@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SKU 图片打包工具</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: #f5f5f5;
+    display: flex;
+    justify-content: center;
+    padding: 40px 20px;
+    min-height: 100vh;
+  }
+  .container {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    padding: 40px;
+    max-width: 680px;
+    width: 100%;
+  }
+  h1 { font-size: 22px; margin-bottom: 8px; }
+  .sub { color: #999; font-size: 13px; margin-bottom: 28px; }
+
+  .upload-zone {
+    border: 2px dashed #d9d9d9;
+    border-radius: 10px;
+    padding: 48px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    margin-bottom: 24px;
+  }
+  .upload-zone:hover, .upload-zone.dragover {
+    border-color: #4A90D9;
+    background: #f0f7ff;
+  }
+  .upload-zone .icon { font-size: 40px; margin-bottom: 10px; }
+  .upload-zone .hint { color: #666; font-size: 14px; }
+  .upload-zone .hint span { color: #4A90D9; text-decoration: underline; }
+
+  .settings { margin-bottom: 24px; }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .row label { font-size: 14px; white-space: nowrap; min-width: 70px; color: #333; }
+  .row input, .row select {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #d9d9d9;
+    border-radius: 6px;
+    font-size: 14px;
+    outline: none;
+  }
+  .row input:focus, .row select:focus { border-color: #4A90D9; }
+
+  .file-list { margin-bottom: 24px; }
+  .file-list .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .file-list .head span { font-size: 14px; color: #333; font-weight: 600; }
+  .file-list .head .clear { font-size: 12px; color: #999; cursor: pointer; }
+  .file-list .head .clear:hover { color: #e74c3c; }
+  .file-list ul {
+    list-style: none;
+    max-height: 260px;
+    overflow-y: auto;
+    border: 1px solid #eee;
+    border-radius: 6px;
+    padding: 8px;
+  }
+  .file-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    color: #333;
+  }
+  .file-list li:nth-child(odd) { background: #fafafa; }
+  .file-list li .sku-name { font-family: monospace; }
+  .file-list li .warn { color: #e67e22; font-size: 12px; }
+  .file-list li .err { color: #e74c3c; font-size: 12px; }
+  .empty { color: #bbb; font-size: 13px; text-align: center; padding: 20px; }
+
+  .btn {
+    width: 100%;
+    padding: 12px;
+    background: #4A90D9;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: background .2s;
+  }
+  .btn:hover { background: #3a7bc8; }
+  .btn:disabled { background: #ccc; cursor: not-allowed; }
+
+  .msg { margin-top: 12px; font-size: 13px; text-align: center; min-height: 20px; }
+  .msg.ok { color: #27ae60; }
+  .msg.err { color: #e74c3c; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>SKU 图片打包</h1>
+  <p class="sub">上传以 SKU 命名的图片，自动生成 1：1主图 目录结构的压缩包</p>
+
+  <div class="upload-zone" id="dropZone">
+    <div class="icon">📁</div>
+    <p class="hint">拖拽图片到此处，或 <span>点击选择文件</span></p>
+  </div>
+  <input type="file" id="fileInput" multiple accept="image/*" style="display:none">
+
+  <div class="settings">
+    <div class="row">
+      <label>输出格式</label>
+      <select id="outFormat">
+        <option value="original">保持原格式</option>
+        <option value="jpg">统一转为 JPG</option>
+        <option value="png">统一转为 PNG</option>
+        <option value="webp">统一转为 WebP</option>
+      </select>
+    </div>
+    <div class="row">
+      <label>大小限制</label>
+      <input type="number" id="maxSize" value="3" min="0.1" step="0.1">
+      <span style="font-size:13px;color:#999;white-space:nowrap">MB（超出跳过）</span>
+    </div>
+    <div class="row">
+      <label>输出文件名</label>
+      <input type="text" id="outName" value="1">
+    </div>
+  </div>
+
+  <div class="file-list">
+    <div class="head">
+      <span>文件列表 (<em id="count">0</em>)</span>
+      <span class="clear" id="clearBtn">清空</span>
+    </div>
+    <ul id="fileList"><li class="empty">暂无文件</li></ul>
+  </div>
+
+  <button class="btn" id="genBtn" disabled>生成并下载压缩包</button>
+  <div class="msg" id="msg"></div>
+</div>
+
+<script>
+const DROP_ZONE = document.getElementById('dropZone');
+const FILE_INPUT = document.getElementById('fileInput');
+const FILE_LIST = document.getElementById('fileList');
+const COUNT_EL = document.getElementById('count');
+const GEN_BTN = document.getElementById('genBtn');
+const MSG_EL = document.getElementById('msg');
+const CLEAR_BTN = document.getElementById('clearBtn');
+
+let files = [];
+
+DROP_ZONE.addEventListener('click', () => FILE_INPUT.click());
+DROP_ZONE.addEventListener('dragover', e => { e.preventDefault(); DROP_ZONE.classList.add('dragover'); });
+DROP_ZONE.addEventListener('dragleave', () => DROP_ZONE.classList.remove('dragover'));
+DROP_ZONE.addEventListener('drop', e => {
+  e.preventDefault();
+  DROP_ZONE.classList.remove('dragover');
+  addFiles(Array.from(e.dataTransfer.files));
+});
+FILE_INPUT.addEventListener('change', () => {
+  addFiles(Array.from(FILE_INPUT.files));
+  FILE_INPUT.value = '';
+});
+CLEAR_BTN.addEventListener('click', () => {
+  files = [];
+  renderList();
+});
+
+function addFiles(newFiles) {
+  const imageExts = ['.jpg','.jpeg','.png','.webp','.gif','.bmp'];
+  const filtered = newFiles.filter(f => {
+    const ext = '.' + f.name.split('.').pop().toLowerCase();
+    return imageExts.includes(ext);
+  });
+  files = files.concat(filtered);
+  renderList();
+}
+
+function renderList() {
+  FILE_LIST.innerHTML = '';
+  COUNT_EL.textContent = files.length;
+  GEN_BTN.disabled = files.length === 0;
+
+  if (files.length === 0) {
+    FILE_LIST.innerHTML = '<li class="empty">暂无文件</li>';
+    return;
+  }
+
+  const maxSize = parseFloat(document.getElementById('maxSize').value) * 1024 * 1024;
+  files.forEach(f => {
+    const li = document.createElement('li');
+    const sku = f.name.replace(/\.[^.]+$/, '');
+    const oversize = f.size > maxSize;
+
+    li.innerHTML = `
+      <span class="sku-name">${sku}</span>
+      <span>${(f.size / 1024).toFixed(0)} KB ${oversize ? '<span class="warn">超限</span>' : ''}</span>
+    `;
+    FILE_LIST.appendChild(li);
+  });
+}
+
+document.getElementById('maxSize').addEventListener('change', renderList);
+
+GEN_BTN.addEventListener('click', async () => {
+  if (files.length === 0) return;
+
+  GEN_BTN.disabled = true;
+  GEN_BTN.textContent = '打包中...';
+  MSG_EL.textContent = '';
+  MSG_EL.className = 'msg';
+
+  const maxSize = parseFloat(document.getElementById('maxSize').value) * 1024 * 1024;
+  const outName = document.getElementById('outName').value.trim() || '1';
+  const outFormat = document.getElementById('outFormat').value;
+
+  const zip = new JSZip();
+  const root = zip.folder('1：1主图');
+  let skipped = 0;
+
+  for (const f of files) {
+    if (f.size > maxSize) { skipped++; continue; }
+
+    const sku = f.name.replace(/\.[^.]+$/, '');
+    const ext = f.name.split('.').pop().toLowerCase();
+
+    let finalName, blob;
+    if (outFormat === 'original') {
+      finalName = outName + '.' + ext;
+      blob = f;
+    } else {
+      const mimeMap = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
+      finalName = outName + '.' + outFormat;
+      blob = await convertFormat(f, mimeMap[outFormat]);
+    }
+
+    root.folder(sku).file(finalName, blob);
+  }
+
+  try {
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(zipBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'SKU主图_' + new Date().toISOString().slice(0,10) + '.zip';
+    a.click();
+    URL.revokeObjectURL(url);
+
+    MSG_EL.textContent = `完成！${files.length - skipped}/${files.length} 张打包成功` + (skipped > 0 ? `，${skipped} 张超限跳过` : '');
+    MSG_EL.className = 'msg ok';
+  } catch (e) {
+    MSG_EL.textContent = '打包失败: ' + e.message;
+    MSG_EL.className = 'msg err';
+  }
+
+  GEN_BTN.disabled = files.length === 0;
+  GEN_BTN.textContent = '生成并下载压缩包';
+});
+
+function convertFormat(file, mime) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      canvas.toBlob(b => {
+        URL.revokeObjectURL(url);
+        resolve(b);
+      }, mime, 0.92);
+    };
+    img.onerror = () => reject(new Error('图片加载失败'));
+    img.src = url;
+  });
+}
+</script>
+</body>
+</html>
