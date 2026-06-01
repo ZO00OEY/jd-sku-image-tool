@@ -20,7 +20,7 @@
     border-radius: 12px;
     box-shadow: 0 2px 12px rgba(0,0,0,0.08);
     padding: 40px;
-    max-width: 680px;
+    max-width: 720px;
     width: 100%;
   }
   h1 { font-size: 22px; margin-bottom: 8px; }
@@ -61,6 +61,17 @@
   }
   .row input:focus, .row select:focus { border-color: #4A90D9; }
 
+  .summary { display: flex; gap: 16px; margin-bottom: 16px; }
+  .summary .tag {
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+  }
+  .tag.tag-11 { background: #e8f4fd; color: #2a7eb0; }
+  .tag.tag-34 { background: #fef3e4; color: #b87a2b; }
+  .tag.tag-other { background: #f5f5f5; color: #999; }
+
   .file-list { margin-bottom: 24px; }
   .file-list .head {
     display: flex;
@@ -90,8 +101,11 @@
   }
   .file-list li:nth-child(odd) { background: #fafafa; }
   .file-list li .sku-name { font-family: monospace; }
+  .file-list li .info { display: flex; align-items: center; gap: 8px; }
+  .file-list li .dims { color: #888; font-size: 12px; }
   .file-list li .warn { color: #e67e22; font-size: 12px; }
   .file-list li .err { color: #e74c3c; font-size: 12px; }
+  .file-list li:hover { background: #f0f7ff; }
   .empty { color: #bbb; font-size: 13px; text-align: center; padding: 20px; }
 
   .btn {
@@ -111,12 +125,14 @@
   .msg { margin-top: 12px; font-size: 13px; text-align: center; min-height: 20px; }
   .msg.ok { color: #27ae60; }
   .msg.err { color: #e74c3c; }
+
+  .folder-desc { font-size: 12px; color: #aaa; margin-top: 4px; }
 </style>
 </head>
 <body>
 <div class="container">
   <h1>SKU 图片打包</h1>
-  <p class="sub">上传以 SKU 命名的图片，自动生成 1：1主图 目录结构的压缩包</p>
+  <p class="sub">自动检测图片比例，生成 1：1主图 / 3：4主图 目录结构的压缩包</p>
 
   <div class="upload-zone" id="dropZone">
     <div class="icon">📁</div>
@@ -150,6 +166,7 @@
       <span>文件列表 (<em id="count">0</em>)</span>
       <span class="clear" id="clearBtn">清空</span>
     </div>
+    <div class="summary" id="summary"></div>
     <ul id="fileList"><li class="empty">暂无文件</li></ul>
   </div>
 
@@ -165,8 +182,9 @@ const COUNT_EL = document.getElementById('count');
 const GEN_BTN = document.getElementById('genBtn');
 const MSG_EL = document.getElementById('msg');
 const CLEAR_BTN = document.getElementById('clearBtn');
+const SUMMARY = document.getElementById('summary');
 
-let files = [];
+let files = []; // { file, ratio, folder }
 
 DROP_ZONE.addEventListener('click', () => FILE_INPUT.click());
 DROP_ZONE.addEventListener('dragover', e => { e.preventDefault(); DROP_ZONE.classList.add('dragover'); });
@@ -181,17 +199,48 @@ FILE_INPUT.addEventListener('change', () => {
   FILE_INPUT.value = '';
 });
 CLEAR_BTN.addEventListener('click', () => {
+  files.forEach(f => { if (f.url) URL.revokeObjectURL(f.url); });
   files = [];
   renderList();
 });
 
-function addFiles(newFiles) {
+function getImageDims(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      resolve({ w: img.naturalWidth, h: img.naturalHeight, url });
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+function classifyRatio(w, h) {
+  const r = w / h;
+  const dist11 = Math.abs(r - 1.0);
+  const dist34 = Math.abs(r - 0.75);
+  if (dist11 < dist34) return '1:1';
+  return '3:4';
+}
+
+function folderName(type) {
+  return type === '1:1' ? '1：1主图' : '3：4主图';
+}
+
+async function addFiles(newFiles) {
   const imageExts = ['.jpg','.jpeg','.png','.webp','.gif','.bmp'];
   const filtered = newFiles.filter(f => {
     const ext = '.' + f.name.split('.').pop().toLowerCase();
     return imageExts.includes(ext);
   });
-  files = files.concat(filtered);
+
+  for (const f of filtered) {
+    const dims = await getImageDims(f);
+    const ratio = dims ? classifyRatio(dims.w, dims.h) : '?';
+    files.push({ file: f, ratio, folder: folderName(ratio), dims: dims ? `${dims.w}×${dims.h}` : '未知', url: dims ? dims.url : null });
+  }
+
   renderList();
 }
 
@@ -200,21 +249,39 @@ function renderList() {
   COUNT_EL.textContent = files.length;
   GEN_BTN.disabled = files.length === 0;
 
+  const maxSize = parseFloat(document.getElementById('maxSize').value) * 1024 * 1024;
+
+  let count11 = 0, count34 = 0, countOther = 0;
+  files.forEach(f => {
+    if (f.ratio === '1:1') count11++;
+    else if (f.ratio === '3:4') count34++;
+    else countOther++;
+  });
+  let summaryHTML = '';
+  if (count11) summaryHTML += `<span class="tag tag-11">1:1 主图 ${count11} 张</span>`;
+  if (count34) summaryHTML += `<span class="tag tag-34">3:4 主图 ${count34} 张</span>`;
+  if (countOther) summaryHTML += `<span class="tag tag-other">无法识别 ${countOther} 张</span>`;
+  SUMMARY.innerHTML = summaryHTML;
+
   if (files.length === 0) {
     FILE_LIST.innerHTML = '<li class="empty">暂无文件</li>';
     return;
   }
 
-  const maxSize = parseFloat(document.getElementById('maxSize').value) * 1024 * 1024;
+  const ratioLabels = { '1:1': '1:1 → 1：1主图', '3:4': '3:4 → 3：4主图', '?': '识别失败' };
+
   files.forEach(f => {
     const li = document.createElement('li');
-    const sku = f.name.replace(/\.[^.]+$/, '');
-    const oversize = f.size > maxSize;
-
-    li.innerHTML = `
-      <span class="sku-name">${sku}</span>
-      <span>${(f.size / 1024).toFixed(0)} KB ${oversize ? '<span class="warn">超限</span>' : ''}</span>
-    `;
+    const sku = f.file.name.replace(/\.[^.]+$/, '');
+    const oversize = f.file.size > maxSize;
+    const info = [
+      `<span class="sku-name">${sku}</span>`,
+      `<span class="dims">${ratioLabels[f.ratio] || f.ratio}</span>`,
+      `<span class="dims">${f.dims}</span>`,
+      `<span>${(f.file.size / 1024).toFixed(0)} KB</span>`,
+      oversize ? '<span class="warn">超限</span>' : ''
+    ].join(' ');
+    li.innerHTML = `<div class="info">${info}</div>`;
     FILE_LIST.appendChild(li);
   });
 }
@@ -234,14 +301,18 @@ GEN_BTN.addEventListener('click', async () => {
   const outFormat = document.getElementById('outFormat').value;
 
   const zip = new JSZip();
-  const root = zip.folder('1：1主图');
+  let folder11 = zip.folder('1：1主图');
+  let folder34 = zip.folder('3：4主图');
   let skipped = 0;
+  let count11 = 0, count34 = 0;
 
-  for (const f of files) {
+  for (const entry of files) {
+    const f = entry.file;
     if (f.size > maxSize) { skipped++; continue; }
 
     const sku = f.name.replace(/\.[^.]+$/, '');
     const ext = f.name.split('.').pop().toLowerCase();
+    const targetFolder = entry.ratio === '1:1' ? folder11 : folder34;
 
     let finalName, blob;
     if (outFormat === 'original') {
@@ -253,7 +324,8 @@ GEN_BTN.addEventListener('click', async () => {
       blob = await convertFormat(f, mimeMap[outFormat]);
     }
 
-    root.folder(sku).file(finalName, blob);
+    targetFolder.folder(sku).file(finalName, blob);
+    if (entry.ratio === '1:1') count11++; else count34++;
   }
 
   try {
@@ -265,7 +337,10 @@ GEN_BTN.addEventListener('click', async () => {
     a.click();
     URL.revokeObjectURL(url);
 
-    MSG_EL.textContent = `完成！${files.length - skipped}/${files.length} 张打包成功` + (skipped > 0 ? `，${skipped} 张超限跳过` : '');
+    const parts = [];
+    if (count11) parts.push(`1:1 ${count11} 张`);
+    if (count34) parts.push(`3:4 ${count34} 张`);
+    MSG_EL.textContent = `完成！${parts.join('，')}` + (skipped > 0 ? `，${skipped} 张超限跳过` : '');
     MSG_EL.className = 'msg ok';
   } catch (e) {
     MSG_EL.textContent = '打包失败: ' + e.message;
